@@ -1,39 +1,33 @@
 const TelegramBot = require("node-telegram-bot-api");
 
-// Zameniti sa tokenom koji ti je dao BotFather
 const token = "7186386818:AAFQie514Fs-73wInZGPyGwUA3_xNj1A7Mc";
 const bot = new TelegramBot(token, { polling: true });
 
-let currentGame = {
-  isActive: false,
-  totalSol: 0,
-  bets: [],
-  endTime: null,
-  timeRemaining: null,
-};
+let currentGames = [];
 
 function startBettingRound(chatId) {
-  const totalSol = 0; // inicijalno nema uloga
-  const duration = 5 * 60 * 1000; // 5 minuta u ms
+  const totalSol = 0;
+  const duration = 5 * 60 * 1000; // 5 min
   const endTime = Date.now() + duration;
 
-  const updateMessage = () => {
-    const timeLeftMs = endTime - Date.now();
-    const timeLeftMin = Math.floor(timeLeftMs / 60000);
-    const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
+  const timeLeftMs = endTime - Date.now();
+  const timeLeftMin = Math.floor(timeLeftMs / 60000);
+  const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
 
-    const timeString =
-      timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
+  const timeString =
+    timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
 
-    currentGame = {
-      isActive: true,
-      totalSol: totalSol,
-      bets: [],
-      endTime: endTime,
-      timeRemaining: timeString,
-    };
+  let newGame = {
+    isActive: true,
+    totalSol: totalSol,
+    bets: [],
+    endTime: endTime,
+    timeRemaining: timeString,
+  };
 
-    const text = `🔥 A new 5-minute betting round has started!
+  currentGames.push(newGame);
+
+  const text = `🔥 A new 5-minute betting round has started!
 
       💰 Total SOL in pool: ${totalSol} SOL
       ⏳ Time remaining: ${timeString}
@@ -43,48 +37,97 @@ function startBettingRound(chatId) {
 
       Example: /bet 0.5 145.23`;
 
-    const options = {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "ℹ️ Help", callback_data: "help" }],
-          [{ text: "📊 Status", callback_data: "status" }],
-          [{ text: "📋 Menu", callback_data: "menu" }],
-        ],
-      },
-    };
-    bot.sendMessage(chatId, text, options);
+  const options = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "ℹ️ Help", callback_data: "help" }],
+        [{ text: "📊 Status", callback_data: "status" }],
+        [{ text: "📋 Menu", callback_data: "menu" }],
+      ],
+    },
   };
 
-  updateMessage();
+  bot.sendMessage(chatId, text, options);
 
-  setTimeout(() => {
-    currentGame.isActive = false;
+  setTimeout(() => finishGame(chatId, newGame, currentGames.length), duration);
+}
 
-    // Determine the winner based on the bets and reset currentGame
+function finishGame(chatId, game, gameIndex) {
+  game.isActive = false;
+  console.log("Game finished:", game);
+  // Determine the winner based on the bets and reset currentGame
 
-    const resultText = `⏱️ Time is up! The betting round has ended.
-      💰 Total SOL in pool: ${currentGame.totalSol} SOL
+  const resultText = `⏱️ Time is up! The betting round has ended.
+      💰 Total SOL in pool: ${game.totalSol} SOL
 
       🏆 The winner is: [winner's name] with a prediction of [winner's prediction]!
 
       Thank you for playing!
     `;
 
-    bot.sendMessage(chatId, resultText);
-  }, duration);
+  currentGames = currentGames.filter((g, index) => index !== gameIndex);
+
+  bot.sendMessage(chatId, resultText);
+}
+
+function showStatus(chatId) {
+  if (currentGames.length === 0) {
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📊 Status", callback_data: "status" }],
+          [{ text: "📋 Menu", callback_data: "menu" }],
+        ],
+      },
+    };
+    bot.sendMessage(chatId, "📊 No active game at the moment.", options);
+  } else {
+    for (i = 0; i < currentGames.length; i++) {
+      const currentGame = currentGames[i];
+      if (currentGame.isActive) {
+        const timeLeftMs = currentGame.endTime - Date.now();
+        const timeLeftMin = Math.floor(timeLeftMs / 60000);
+        const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
+
+        const timeString =
+          timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : ` Time is up!`;
+
+        let text = `📊 Current Game Status:
+    
+          💰 Total SOL in pool: ${currentGame.totalSol} SOL
+          ⏳ Time remaining: ${timeString}\n`;
+        for (let i = 0; i < currentGame.bets.length; i++) {
+          text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} SOL on ${
+            currentGame.bets[i].prediction
+          } by ${currentGame.bets[i].user}`;
+        }
+
+        const options = {
+          reply_markup: {
+            inline_keyboard: [
+              [{ text: "📊 Status", callback_data: "status" }],
+              [{ text: "📋 Menu", callback_data: "menu" }],
+            ],
+          },
+        };
+
+        bot.sendMessage(chatId, text, options);
+      }
+    }
+  }
 }
 
 function showMenu(chatId) {
   const menuText = `📌 Available commands:
 
-/betstart – Start a new 5-minute betting round  
-/help – Show game instructions  
-/status – View current game status  
-/menu – Show this menu again
+  /betstart – Start a new 5-minute betting round  
+  /help – Show game instructions  
+  /status – View current game status  
+  /menu – Show this menu again
 
-🗳 When a game starts, a poll will be posted where you can vote on the future SOL price.  
-💰 To participate, vote in the poll (your vote is your prediction).  
-🏆 After 5 minutes, the bot will determine who was closest and award the winner!`;
+  🗳 When a game starts, a poll will be posted where you can vote on the future SOL price.  
+  💰 To participate, vote in the poll (your vote is your prediction).  
+  🏆 After 5 minutes, the bot will determine who was closest and award the winner!`;
 
   const options = {
     reply_markup: {
@@ -127,40 +170,22 @@ bot.on("callback_query", (query) => {
   if (data === "betstart") {
     startBettingRound(chatId);
   } else if (data === "help") {
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "📊 Status", callback_data: "status" }],
+          [{ text: "📋 Menu", callback_data: "menu" }],
+        ],
+      },
+    };
+
     bot.sendMessage(
       chatId,
-      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the SOL price with /bet [amount] [prediction] and win!\n\n💡 Example: /bet 10 50.00\n\n💰 The closest prediction wins!\n\n"
+      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the SOL price with /bet [amount] [prediction] and win!\n\n💡 Example: /bet 10 50.00\n\n💰 The closest prediction wins!\n\n",
+      options
     );
   } else if (data === "status") {
-    if (currentGame.isActive) {
-      const timeLeftMs = currentGame.endTime - Date.now();
-      const timeLeftMin = Math.floor(timeLeftMs / 60000);
-      const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
-
-      const timeString =
-        timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
-
-      const text = `📊 Current Game Status:
-
-      💰 Total SOL in pool: ${currentGame.totalSol} SOL
-      ⏳ Time remaining: ${timeString}\n`;
-      for (let i = 0; i < currentGame.bets.length; i++) {
-        text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} SOL on ${
-          currentGame.bets[i].prediction
-        } by ${currentGame.bets[i].user}`;
-      }
-
-      const options = {
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "📊 Status", callback_data: "status" }],
-            [{ text: "📋 Menu", callback_data: "menu" }],
-          ],
-        },
-      };
-
-      bot.sendMessage(chatId, text, options);
-    } else bot.sendMessage(chatId, "📊 No active game at the moment.");
+    showStatus(chatId);
   } else if (data === "menu") {
     showMenu(chatId);
   } else {
