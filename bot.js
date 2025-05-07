@@ -20,9 +20,10 @@ function startBettingRound(chatId) {
 
   bot.once("message", async (reply) => {
     const rep = reply.text;
+    tokenName = rep.toLowerCase();
     let price = await getPrice(rep);
 
-    if (!price) {
+    if (!price || !price[tokenName]) {
       const options = {
         reply_markup: {
           inline_keyboard: [[{ text: "📋 Menu", callback_data: "menu" }]],
@@ -35,8 +36,6 @@ function startBettingRound(chatId) {
       );
       return;
     }
-
-    tokenName = rep;
 
     const totalTokens = 0;
     const duration = 5 * 60 * 1000; // 5 min
@@ -131,12 +130,14 @@ function showStatus(chatId) {
 
         let text = `📊 Current Game Status:
     
-          💰 Total SOL in pool: ${currentGame.totalTokens} SOL
+          💰 Total tokens in pool: ${currentGame.totalTokens} 
           ⏳ Time remaining: ${timeString}\n`;
         for (let i = 0; i < currentGame.bets.length; i++) {
-          text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} SOL on ${
-            currentGame.bets[i].prediction
-          } by ${currentGame.bets[i].user}`;
+          text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} ${
+            currentGame.tokenName
+          } on ${currentGame.bets[i].prediction} by ${
+            currentGame.bets[i].user
+          }`;
         }
 
         const options = {
@@ -198,6 +199,13 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/menu/, (msg) => {
   const chatId = msg.chat.id;
   showMenu(chatId);
+});
+
+bot.onText(/\/bet /, (msg) => {});
+
+bot.onText(/\/betstart/, (msg) => {
+  const chatId = msg.chat.id;
+  startBettingRound(chatId);
 });
 
 bot.on("callback_query", (query) => {
