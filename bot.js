@@ -1,35 +1,68 @@
 const TelegramBot = require("node-telegram-bot-api");
+const { getPrice } = require("./utils");
+require("dotenv").config();
 
-const token = "7186386818:AAFQie514Fs-73wInZGPyGwUA3_xNj1A7Mc";
-const bot = new TelegramBot(token, { polling: true });
+const TOKEN = process.env.BOT_TOKEN;
+const bot = new TelegramBot(TOKEN, { polling: true });
 
 let currentGames = [];
 
 function startBettingRound(chatId) {
-  const totalSol = 0;
-  const duration = 5 * 60 * 1000; // 5 min
-  const endTime = Date.now() + duration;
+  bot.sendMessage(
+    chatId,
+    `🪙 Choose a token for betting game!  
 
-  const timeLeftMs = endTime - Date.now();
-  const timeLeftMin = Math.floor(timeLeftMs / 60000);
-  const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
+        Example: solana, bitcoin, ethereum, etc.
+        
+        `
+  );
+  let tokenName = "";
 
-  const timeString =
-    timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
+  bot.once("message", async (reply) => {
+    const rep = reply.text;
+    let price = await getPrice(rep);
 
-  let newGame = {
-    isActive: true,
-    totalSol: totalSol,
-    bets: [],
-    endTime: endTime,
-    timeRemaining: timeString,
-  };
+    if (!price) {
+      const options = {
+        reply_markup: {
+          inline_keyboard: [[{ text: "📋 Menu", callback_data: "menu" }]],
+        },
+      };
+      bot.sendMessage(
+        chatId,
+        "❌ Invalid token name. Please try again.",
+        options
+      );
+      return;
+    }
 
-  currentGames.push(newGame);
+    tokenName = rep;
 
-  const text = `🔥 A new 5-minute betting round has started!
+    const totalTokens = 0;
+    const duration = 5 * 60 * 1000; // 5 min
+    const endTime = Date.now() + duration;
 
-      💰 Total SOL in pool: ${totalSol} SOL
+    const timeLeftMs = endTime - Date.now();
+    const timeLeftMin = Math.floor(timeLeftMs / 60000);
+    const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
+
+    const timeString =
+      timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
+
+    let newGame = {
+      isActive: true,
+      tokenName: tokenName,
+      totalTokens: totalTokens,
+      bets: [],
+      endTime: endTime,
+      timeRemaining: timeString,
+    };
+
+    currentGames.push(newGame);
+
+    const text = `🔥 A new 5-minute betting round has started!
+      📈 Token: ${tokenName.toUpperCase()}
+      💰 Total tokens in pool: ${totalTokens} 
       ⏳ Time remaining: ${timeString}
 
       📥 To place a prediction, use:
@@ -37,19 +70,23 @@ function startBettingRound(chatId) {
 
       Example: /bet 0.5 145.23`;
 
-  const options = {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "ℹ️ Help", callback_data: "help" }],
-        [{ text: "📊 Status", callback_data: "status" }],
-        [{ text: "📋 Menu", callback_data: "menu" }],
-      ],
-    },
-  };
+    const options = {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "ℹ️ Help", callback_data: "help" }],
+          [{ text: "📊 Status", callback_data: "status" }],
+          [{ text: "📋 Menu", callback_data: "menu" }],
+        ],
+      },
+    };
 
-  bot.sendMessage(chatId, text, options);
+    bot.sendMessage(chatId, text, options);
 
-  setTimeout(() => finishGame(chatId, newGame, currentGames.length), duration);
+    setTimeout(
+      () => finishGame(chatId, newGame, currentGames.length),
+      duration
+    );
+  });
 }
 
 function finishGame(chatId, game, gameIndex) {
@@ -58,7 +95,7 @@ function finishGame(chatId, game, gameIndex) {
   // Determine the winner based on the bets and reset currentGame
 
   const resultText = `⏱️ Time is up! The betting round has ended.
-      💰 Total SOL in pool: ${game.totalSol} SOL
+      💰 Total SOL in pool: ${game.totalTokens} SOL
 
       🏆 The winner is: [winner's name] with a prediction of [winner's prediction]!
 
@@ -94,7 +131,7 @@ function showStatus(chatId) {
 
         let text = `📊 Current Game Status:
     
-          💰 Total SOL in pool: ${currentGame.totalSol} SOL
+          💰 Total SOL in pool: ${currentGame.totalTokens} SOL
           ⏳ Time remaining: ${timeString}\n`;
         for (let i = 0; i < currentGame.bets.length; i++) {
           text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} SOL on ${
