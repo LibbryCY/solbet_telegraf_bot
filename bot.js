@@ -1,20 +1,22 @@
 const TelegramBot = require("node-telegram-bot-api");
 const { getPrice } = require("./utils");
+const { parse } = require("dotenv");
 require("dotenv").config();
 
 const TOKEN = process.env.BOT_TOKEN;
 const bot = new TelegramBot(TOKEN, { polling: true });
 
-let currentGames = [];
+let currentGames = {};
+let gameId = 0;
 
 function startBettingRound(chatId) {
   bot.sendMessage(
     chatId,
-    `🪙 Choose a token for betting game!  
+    `🪙 *Choose a token to bet on:*
+Solana, Bitcoin, Ethereum, etc.
 
-        Example: solana, bitcoin, ethereum, etc.
-        
-        `
+📌 _Type the token name below to continue..._`,
+    { parse_mode: "Markdown" }
   );
   let tokenName = "";
 
@@ -49,6 +51,7 @@ function startBettingRound(chatId) {
       timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
 
     let newGame = {
+      id: gameId++,
       isActive: true,
       tokenName: tokenName,
       totalTokens: totalTokens,
@@ -57,7 +60,7 @@ function startBettingRound(chatId) {
       timeRemaining: timeString,
     };
 
-    currentGames.push(newGame);
+    currentGames[newGame.id] = newGame;
 
     const text = `🔥 A new 5-minute betting round has started!
       📈 Token: ${tokenName.toUpperCase()}
@@ -65,9 +68,9 @@ function startBettingRound(chatId) {
       ⏳ Time remaining: ${timeString}
 
       📥 To place a prediction, use:
-      /bet [amount] [prediction]
+      /bet [gameId] [amount] [prediction] ( Long or short )
 
-      Example: /bet 0.5 145.23`;
+      Example: /bet 1 0.5 long`;
 
     const options = {
       reply_markup: {
@@ -94,20 +97,24 @@ function finishGame(chatId, game, gameIndex) {
   // Determine the winner based on the bets and reset currentGame
 
   const resultText = `⏱️ Time is up! The betting round has ended.
-      💰 Total SOL in pool: ${game.totalTokens} SOL
+      🔥 Game ID: ${game.id}
+      📈 Token: ${game.tokenName.toUpperCase()}
+      💰 Total tokens in pool: ${game.totalTokens} tokens
 
-      🏆 The winner is: [winner's name] with a prediction of [winner's prediction]!
+      🏆 Congratulations to all who went 📈 LONG — you predicted the price increase correctly!
+      🏆 Congratulations to all who went 📉 SHORT — you predicted the price decrease correctly!
 
       Thank you for playing!
     `;
 
-  currentGames = currentGames.filter((g, index) => index !== gameIndex);
+  delete currentGames[game.gameId];
 
   bot.sendMessage(chatId, resultText);
 }
 
 function showStatus(chatId) {
-  if (currentGames.length === 0) {
+  console.log(Object.keys(currentGames).length);
+  if (Object.keys(currentGames).length === 0) {
     const options = {
       reply_markup: {
         inline_keyboard: [
@@ -118,8 +125,7 @@ function showStatus(chatId) {
     };
     bot.sendMessage(chatId, "📊 No active game at the moment.", options);
   } else {
-    for (i = 0; i < currentGames.length; i++) {
-      const currentGame = currentGames[i];
+    for (const [gameId, currentGame] of Object.entries(currentGames)) {
       if (currentGame.isActive) {
         const timeLeftMs = currentGame.endTime - Date.now();
         const timeLeftMin = Math.floor(timeLeftMs / 60000);
@@ -129,9 +135,11 @@ function showStatus(chatId) {
           timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : ` Time is up!`;
 
         let text = `📊 Current Game Status:
-    
+          🔥 Game ID: ${currentGame.id}
+          📈 Token: ${currentGame.tokenName.toUpperCase()}
           💰 Total tokens in pool: ${currentGame.totalTokens} 
           ⏳ Time remaining: ${timeString}\n`;
+
         for (let i = 0; i < currentGame.bets.length; i++) {
           text += `\nBet #${i + 1}: ${currentGame.bets[i].amount} ${
             currentGame.tokenName
@@ -163,9 +171,9 @@ function showMenu(chatId) {
   /status – View current game status  
   /menu – Show this menu again
 
-  🗳 When a game starts, a poll will be posted where you can vote on the future SOL price.  
+  🗳 When a game starts, a poll will be posted where you can vote on the future token price.  
   💰 To participate, vote in the poll (your vote is your prediction).  
-  🏆 After 5 minutes, the bot will determine who was closest and award the winner!`;
+  🏆 After 5 minutes, the bot will determine who was right and award the winners!`;
 
   const options = {
     reply_markup: {
@@ -181,6 +189,44 @@ function showMenu(chatId) {
   bot.sendMessage(chatId, menuText, options);
 }
 
+function placeBet(chatId, user, gameId, amount, prediction) {
+  if (Object.keys(currentGames).length === 0) {
+    bot.sendMessage(
+      chatId,
+      "❌ No active game with ID. Please start a new game."
+    );
+    return;
+  }
+
+  const game = currentGames[gameId];
+  if (!game || !game.isActive) {
+    bot.sendMessage(chatId, `❌ No active game with ID ${gameId}.`);
+    return;
+  }
+  if (amount <= 0) {
+    bot.sendMessage(chatId, "❌ Invalid bet amount. Must be greater than 0.");
+    return;
+  }
+
+  if (prediction !== "long" && prediction !== "short") {
+    bot.sendMessage(chatId, "❌ Invalid prediction. Use 'long' or 'short'.");
+    return;
+  }
+  let bet = {
+    user: user,
+    amount: amount,
+    prediction: prediction,
+  };
+
+  game.bets.push(bet);
+  game.totalTokens += parseFloat(amount);
+
+  bot.sendMessage(
+    chatId,
+    `✅ Bet placed! Amount: ${amount} ${game.tokenName}, Prediction: ${prediction} by ${user}.`
+  );
+}
+
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
   const options = {
@@ -191,7 +237,7 @@ bot.onText(/\/start/, (msg) => {
 
   bot.sendMessage(
     chatId,
-    "🎲 Welcome to Solana Bet Bot! 🚀\n\nPlace your bets with $SOL or other SPL tokens in this group! Fast, fun, and fully on-chain.\n\n🔹 How to play?\n\n1. Send /bet [amount] [prediction]\n2. Wait for others to join\n3. The bot settles winners automatically!\n\n💰 Win big, pay fast – all powered by Solana!\n\nType /menu for options. Let's roll! 🎯",
+    "🎲 Welcome to Solana Bet Bot! 🚀\n\nPlace your bets with $SOL in this group! Fast, fun, and fully on-chain.\n\n🔹 How to play?\n\n1. Send /bet [gameId] [amount] [prediction]\n2. Wait for others to join\n3. The bot settles winners automatically!\n\n💰 Win big, pay fast – all powered by Solana!\n\nType /menu for options. Let's roll! 🎯",
     options
   );
 });
@@ -201,7 +247,19 @@ bot.onText(/\/menu/, (msg) => {
   showMenu(chatId);
 });
 
-bot.onText(/\/bet /, (msg) => {});
+bot.onText(/\/bet (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const user = msg.from.username;
+
+  const input = match[1].trim().split(" ");
+  if (input.length !== 3) {
+    return bot.sendMessage(
+      chatId,
+      "❌ Invalid format.\nUse /bet [gameId] [amount in SOL] [prediction]\nExample: /bet 1 0.5 short"
+    );
+  }
+  placeBet(chatId, user, parseInt(input[0]), parseFloat(input[1]), input[2]);
+});
 
 bot.onText(/\/betstart/, (msg) => {
   const chatId = msg.chat.id;
@@ -226,7 +284,7 @@ bot.on("callback_query", (query) => {
 
     bot.sendMessage(
       chatId,
-      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the SOL price with /bet [amount] [prediction] and win!\n\n💡 Example: /bet 10 50.00\n\n💰 The closest prediction wins!\n\n",
+      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the SOL price with /bet [gameId] [amount] [prediction] and win!\n\n💡 Example: /bet 1 10 50.00\n\n💰 The closest prediction wins!\n\n",
       options
     );
   } else if (data === "status") {
