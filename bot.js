@@ -1,6 +1,5 @@
 const TelegramBot = require("node-telegram-bot-api");
 const { getPrice } = require("./utils");
-const { parse } = require("dotenv");
 require("dotenv").config();
 
 const TOKEN = process.env.BOT_TOKEN;
@@ -8,8 +7,11 @@ const bot = new TelegramBot(TOKEN, { polling: true });
 
 let currentGames = {};
 let gameId = 0;
+let awaitingTokenInput = {}; // chatId => true/false
 
 function startBettingRound(chatId) {
+  awaitingTokenInput[chatId] = true; // označi da čekamo token
+
   bot.sendMessage(
     chatId,
     `🪙 *Choose a token to bet on:*
@@ -20,59 +22,54 @@ Solana, Bitcoin, Ethereum, etc.
   );
   let tokenName = "";
 
-  bot.once("message", async (reply) => {
-    const rep = reply.text;
-    tokenName = rep.toLowerCase();
-    let price = await getPrice(rep);
+  bot.on("message", async (msg) => {
+    const chatId = msg.chat.id;
+
+    if (!awaitingTokenInput[chatId]) return;
+
+    const rep = msg.text.trim();
+    const tokenName = rep.toLowerCase();
+    const price = await getPrice(tokenName);
 
     if (!price || !price[tokenName]) {
-      const options = {
+      bot.sendMessage(chatId, "❌ Invalid token name. Please try again.", {
         reply_markup: {
           inline_keyboard: [[{ text: "📋 Menu", callback_data: "menu" }]],
         },
-      };
-      bot.sendMessage(
-        chatId,
-        "❌ Invalid token name. Please try again.",
-        options
-      );
+      });
+
       return;
     }
 
+    awaitingTokenInput[chatId] = false;
     const totalTokens = 0;
-    const duration = 5 * 60 * 1000; // 5 min
+    const duration = 5 * 60 * 1000;
     const endTime = Date.now() + duration;
 
-    const timeLeftMs = endTime - Date.now();
-    const timeLeftMin = Math.floor(timeLeftMs / 60000);
-    const timeLeftSec = Math.floor((timeLeftMs % 60000) / 1000);
-
-    const timeString =
-      timeLeftMs > 0 ? `${timeLeftMin}m ${timeLeftSec}s` : `⏱️ Time is up!`;
-
-    let newGame = {
+    const newGame = {
       id: gameId++,
       isActive: true,
-      tokenName: tokenName,
-      totalTokens: totalTokens,
+      tokenName,
+      totalTokens,
       bets: [],
-      endTime: endTime,
-      timeRemaining: timeString,
+      endTime,
     };
 
     currentGames[newGame.id] = newGame;
 
+    const timeString = `5m 0s`;
+
     const text = `🔥 A new 5-minute betting round has started!
-      📈 Token: ${tokenName.toUpperCase()}
-      💰 Total tokens in pool: ${totalTokens} 
-      ⏳ Time remaining: ${timeString}
+  📈 Token: ${tokenName.toUpperCase()}
+  💰 Total tokens in pool: ${totalTokens} 
+  ⏳ Time remaining: ${timeString}
+  
+  📥 To place a prediction, use:
+  /bet [gameId] [amount] [prediction] (long or short)
+  
+  Example: /bet ${newGame.id} 0.5 long`;
 
-      📥 To place a prediction, use:
-      /bet [gameId] [amount] [prediction] ( Long or short )
-
-      Example: /bet 1 0.5 long`;
-
-    const options = {
+    bot.sendMessage(chatId, text, {
       reply_markup: {
         inline_keyboard: [
           [{ text: "ℹ️ Help", callback_data: "help" }],
@@ -80,18 +77,13 @@ Solana, Bitcoin, Ethereum, etc.
           [{ text: "📋 Menu", callback_data: "menu" }],
         ],
       },
-    };
+    });
 
-    bot.sendMessage(chatId, text, options);
-
-    setTimeout(
-      () => finishGame(chatId, newGame, currentGames.length),
-      duration
-    );
+    setTimeout(() => finishGame(chatId, newGame), duration);
   });
 }
 
-function finishGame(chatId, game, gameIndex) {
+function finishGame(chatId, game) {
   game.isActive = false;
   console.log("Game finished:", game);
   // Determine the winner based on the bets and reset currentGame
@@ -107,7 +99,7 @@ function finishGame(chatId, game, gameIndex) {
       Thank you for playing!
     `;
 
-  delete currentGames[game.gameId];
+  delete currentGames[game.id];
 
   bot.sendMessage(chatId, resultText);
 }
@@ -249,7 +241,9 @@ bot.onText(/\/menu/, (msg) => {
 
 bot.onText(/\/bet (.+)/, (msg, match) => {
   const chatId = msg.chat.id;
-  const user = msg.from.username;
+  const user =
+    msg.from.username ||
+    `${msg.from.first_name} ${msg.from.last_name || ""}`.trim();
 
   const input = match[1].trim().split(" ");
   if (input.length !== 3) {
@@ -284,7 +278,7 @@ bot.on("callback_query", (query) => {
 
     bot.sendMessage(
       chatId,
-      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the SOL price with /bet [gameId] [amount] [prediction] and win!\n\n💡 Example: /bet 1 10 50.00\n\n💰 The closest prediction wins!\n\n",
+      "ℹ️ Use /betstart ( or Start Game button) to begin. A poll will appear.\n Predict the token price with /bet [gameId] [amount] [prediction] and win!\n\n💡 Example: /bet 1 10 50.00\n\n💰 The closest prediction wins!\n\n",
       options
     );
   } else if (data === "status") {
